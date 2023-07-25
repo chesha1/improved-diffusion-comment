@@ -37,6 +37,11 @@ def main():
         class_cond=args.class_cond,
     )
 
+    # data is a generator, a is element of data
+    # a[0] is a tensor, a[1] is a empty dict
+    # a[0].shape = [16, 3, 64, 64]
+    # batch, channel, img_size, img_size
+
     logger.log("training...")
     TrainLoop(
         model=model,

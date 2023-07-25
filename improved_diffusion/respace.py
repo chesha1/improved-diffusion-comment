@@ -74,6 +74,11 @@ class SpacedDiffusion(GaussianDiffusion):
         self.timestep_map = []
         self.original_num_steps = len(kwargs["betas"])
 
+        # 创建一个基本扩散过程的GaussianDiffusion对象，并传递给它kwargs参数的副本。
+        # 逐步遍历基本扩散过程的alpha累积乘积，并根据use_timesteps确定要保留的时间步长。
+        # 根据保留的时间步长计算新的beta值，并将它们添加到new_betas列表中。
+        # 更新timestep_map列表，记录保留的时间步长的索引
+
         base_diffusion = GaussianDiffusion(**kwargs)  # pylint: disable=missing-kwoa
         last_alpha_cumprod = 1.0
         new_betas = []
@@ -108,6 +113,7 @@ class SpacedDiffusion(GaussianDiffusion):
 
 
 class _WrappedModel:
+    # 根据需要进行时间步长映射和缩放。它起到了对模型的封装和适配的作用
     def __init__(self, model, timestep_map, rescale_timesteps, original_num_steps):
         self.model = model
         self.timestep_map = timestep_map

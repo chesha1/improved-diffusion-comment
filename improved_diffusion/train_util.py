@@ -112,6 +112,7 @@ class TrainLoop:
             self.ddp_model = self.model
 
     def _load_and_sync_parameters(self):
+        # 加载和同步模型参数，以便从先前的训练中恢复训练或在分布式训练中同步模型参数
         resume_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
 
         if resume_checkpoint:
@@ -124,9 +125,11 @@ class TrainLoop:
                     )
                 )
 
+        # 将模型的参数从主进程广播到其他进程，以便在分布式训练中保持模型参数的同步
         dist_util.sync_params(self.model.parameters())
 
     def _load_ema_parameters(self, rate):
+        # 加载指数移动平均(EMA)模型的参数，并在分布式训练中同步这些参数
         ema_params = copy.deepcopy(self.master_params)
 
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
@@ -186,14 +189,29 @@ class TrainLoop:
         self.log_step()
 
     def forward_backward(self, batch, cond):
+        # 计算梯度并更新模型参数
+
+        # 在每个批次处理之前，使用zero_grad函数将模型参数的梯度置零，以避免梯度在不同批次之间累积
         zero_grad(self.model_params)
+
+        # 在一个批次中循环，使用self.microbatch进行微批次处理。这是为了在GPU内存有限的情况下进行处理
         for i in range(0, batch.shape[0], self.microbatch):
+
+            # 相当于 batch, cond
             micro = batch[i : i + self.microbatch].to(dist_util.dev())
             micro_cond = {
                 k: v[i : i + self.microbatch].to(dist_util.dev())
                 for k, v in cond.items()
             }
             last_batch = (i + self.microbatch) >= batch.shape[0]
+
+            # 从self.schedule_sampler中采样时间步t和权重weights
+            # micro.shape[0]是当前微批次的大小，这将用于确定样本的时间步数
+            # Example:
+            # t = tensor([3857, 2083, 1878,  640, 3186, 2054, 2062, 1975, 1701, 2193, 2199, 1539,
+            #         1943,  309, 1932, 2834], device='cuda:0')
+            # weights = tensor([1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.],
+            #        device='cuda:0')
             t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())
 
             compute_losses = functools.partial(
@@ -204,17 +222,24 @@ class TrainLoop:
                 model_kwargs=micro_cond,
             )
 
+            # losses is a dict with two items loss and mse
+            # losses['loss'] = tensor([0.9817, 0.9968, 1.0041, 1.0235, 1.0148, 0.9826, 0.9986, 1.0048, 1.0013,
+            #         0.9889, 0.9933, 0.9912, 0.9772, 0.9917, 0.9856, 0.9904],
+            #        device='cuda:0', grad_fn=<MeanBackward1>)
             if last_batch or not self.use_ddp:
                 losses = compute_losses()
             else:
                 with self.ddp_model.no_sync():
                     losses = compute_losses()
 
+            # 这段代码用于更新self.schedule_sampler采样器对象的状态，特别是针对LossAwareSampler类型的采样器
             if isinstance(self.schedule_sampler, LossAwareSampler):
                 self.schedule_sampler.update_with_local_losses(
                     t, losses["loss"].detach()
                 )
 
+            # 计算加权平均的损失。weights是根据采样时间步和损失值计算的权重，用于平衡不同时间步的损失
+            # losses has batch_size items, loss is a single number
             loss = (losses["loss"] * weights).mean()
             log_loss_dict(
                 self.diffusion, t, {k: v * weights for k, v in losses.items()}

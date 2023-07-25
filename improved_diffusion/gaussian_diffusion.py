@@ -17,6 +17,8 @@ from .losses import normal_kl, discretized_gaussian_log_likelihood
 
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
     """
+    用于获取预定义的beta（β）调度表，用于高斯扩散模型中的噪声强度调度
+
     Get a pre-defined beta schedule for the given name.
 
     The beta schedule library consists of beta schedules which remain similar
@@ -100,6 +102,10 @@ class LossType(enum.Enum):
 
 class GaussianDiffusion:
     """
+    GaussianDiffusion类提供了计算扩散模型中各种分布和参数的方法，
+    包括q分布、后验分布和p分布的均值和方差计算，以及从q分布中采样和根据模型预测p分布。
+    它是用于训练和采样扩散模型的实用工具类
+
     Utilities for training and sampling diffusion models.
 
     Ported directly from here, and then adapted over time to further experimentation.
@@ -124,6 +130,11 @@ class GaussianDiffusion:
         loss_type,
         rescale_timesteps=False,
     ):
+        '''
+        设置模型的均值类型（model_mean_type）、方差类型（model_var_type）、损失类型（loss_type）
+        和时间步长缩放（rescale_timesteps）等属性
+        确保betas是一个一维数组，且所有元素大于0且小于等于1
+        '''
         self.model_mean_type = model_mean_type
         self.model_var_type = model_var_type
         self.loss_type = loss_type
@@ -170,6 +181,10 @@ class GaussianDiffusion:
 
     def q_mean_variance(self, x_start, t):
         """
+        计算分布q(x_t | x_0)的均值、方差和对数方差。
+        接受初始数据x_start和时间步长t作为输入，并返回一个元组，包含了均值、方差和对数方差。
+        这些结果的形状与x_start相同
+
         Get the distribution q(x_t | x_0).
 
         :param x_start: the [N x C x ...] tensor of noiseless inputs.
@@ -187,6 +202,10 @@ class GaussianDiffusion:
 
     def q_sample(self, x_start, t, noise=None):
         """
+        根据给定的初始数据x_start和时间步长t，从分布q(x_t | x_0)中采样。
+        如果提供了noise参数，则使用该噪声进行采样；
+        否则，使用标准正态分布的随机噪声。返回一个采样结果，形状与x_start相同
+
         Diffuse the data for a given number of diffusion steps.
 
         In other words, sample from q(x_t | x_0).
@@ -207,6 +226,10 @@ class GaussianDiffusion:
 
     def q_posterior_mean_variance(self, x_start, x_t, t):
         """
+        计算后验分布q(x_{t-1} | x_t, x_0)的均值和方差。
+        接受初始数据x_start、当前数据x_t和时间步长t作为输入，并返回后验分布的均值、方差和对数方差。
+        这些结果的形状与x_start和x_t相同
+
         Compute the mean and variance of the diffusion posterior:
 
             q(x_{t-1} | x_t, x_0)
@@ -233,6 +256,10 @@ class GaussianDiffusion:
         self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None
     ):
         """
+        应用模型来计算后验分布p(x_{t-1} | x_t)，
+        以及对初始数据x_0的预测。接受模型对象model、时间步长t、数据x和一些其他可选参数作为输入。
+        根据模型的方差类型，计算后验分布的方差和对数方差
+
         Apply the model to get p(x_{t-1} | x_t), as well as a prediction of
         the initial x, x_0.
 
@@ -643,6 +670,19 @@ class GaussianDiffusion:
         self, model, x_start, x_t, t, clip_denoised=True, model_kwargs=None
     ):
         """
+        model：用于计算后验分布p(x_{t-1} | x_t)的模型。
+        x_start：初始数据x_0。
+        x_t：当前数据x_t。
+        t：时间步长。
+        clip_denoised：如果为True，剪辑去噪后的结果。
+        model_kwargs：如果不为None，这是一个字典，包含传递给模型的额外关键字参数。
+
+        首先，使用q_posterior_mean_variance方法计算后验分布q(x_{t-1} | x_t, x_0)的均值和对数方差。
+        然后，使用p_mean_variance方法计算后验分布p(x_{t-1} | x_t)的均值和方差，并得到预测的初始数据x_0。
+        接下来，计算KL散度（Kullback-Leibler divergence）和解码器的负对数似然（negative log-likelihood）。
+        最后，根据时间步长选择输出项，如果是第一个时间步长，则返回解码器的负对数似然，否则返回KL散度。
+        返回一个包含输出和预测初始数据x_0的字典。
+
         Get a term for the variational lower-bound.
 
         The resulting units are bits (rather than nats, as one might expect).
@@ -676,6 +716,8 @@ class GaussianDiffusion:
 
     def training_losses(self, model, x_start, t, model_kwargs=None, noise=None):
         """
+        用于计算单个时间步长的训练损失
+
         Compute training losses for a single timestep.
 
         :param model: the model to evaluate loss on.
@@ -683,6 +725,8 @@ class GaussianDiffusion:
         :param t: a batch of timestep indices.
         :param model_kwargs: if not None, a dict of extra keyword arguments to
             pass to the model. This can be used for conditioning.
+
+        如果指定，这是要尝试去除的具体高斯噪声
         :param noise: if specified, the specific Gaussian noise to try to remove.
         :return: a dict with the key "loss" containing a tensor of shape [N].
                  Some mean or variance settings may also have other keys.
@@ -691,10 +735,15 @@ class GaussianDiffusion:
             model_kwargs = {}
         if noise is None:
             noise = th.randn_like(x_start)
+
+        # 首先，根据输入数据x_start和时间步长t，使用q_sample方法从分布q(x_t | x_0)中进行采样，得到x_t
         x_t = self.q_sample(x_start, t, noise=noise)
 
         terms = {}
 
+        # 根据损失类型（LossType），计算损失。
+        # 支持的损失类型包括KL散度（KL）、均方误差（MSE）和它们的缩放版本（RESCALED_KL、RESCALED_MSE）
+        # 对于KL散度损失类型，使用_vb_terms_bpd方法计算损失
         if self.loss_type == LossType.KL or self.loss_type == LossType.RESCALED_KL:
             terms["loss"] = self._vb_terms_bpd(
                 model=model,
@@ -706,9 +755,14 @@ class GaussianDiffusion:
             )["output"]
             if self.loss_type == LossType.RESCALED_KL:
                 terms["loss"] *= self.num_timesteps
+
+        # 对于均方误差损失类型，首先使用模型对x_t进行预测，然后计算预测值和目标值之间的均方误差
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
             model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
 
+            # 当模型的方差类型为ModelVarType.LEARNED或ModelVarType.LEARNED_RANGE时，
+            # 会使用变分界（variational bound）来学习方差，并计算VB项的损失。
+            # 这个损失项对于MSE损失类型会进行缩放处理，以保持与初始实现的等价性
             if self.model_var_type in [
                 ModelVarType.LEARNED,
                 ModelVarType.LEARNED_RANGE,

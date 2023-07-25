@@ -22,6 +22,9 @@ def create_named_schedule_sampler(name, diffusion):
 
 class ScheduleSampler(ABC):
     """
+    提供一种在扩散模型中进行时间步骤采样的通用接口，
+    并且子类可以通过重写weights()和sample()方法来实现不同的采样分布和重要性采样策略
+
     A distribution over timesteps in the diffusion process, intended to reduce
     variance of the objective.
 

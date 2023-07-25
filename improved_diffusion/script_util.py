@@ -239,7 +239,24 @@ def create_gaussian_diffusion(
     rescale_learned_sigmas=False,
     timestep_respacing="",
 ):
+
+    '''
+    steps：扩散的步数，默认为1000。
+    learn_sigma：是否学习扩散的标准差参数，默认为False。
+    sigma_small：是否使用较小的标准差参数，默认为False。
+    noise_schedule：噪声调度方式，控制扩散过程中噪声的强度变化，默认为"linear"。
+    use_kl：是否使用KL散度作为损失函数，默认为False。
+    predict_xstart：是否使用起始值作为模型的均值，默认为False。
+    rescale_timesteps：是否重新调整时间步长，默认为False。
+    rescale_learned_sigmas：是否重新调整学习到的标准差，默认为False。
+    timestep_respacing：时间步长重新调整方式，默认为空字符串。
+    '''
+
+
+    # 根据noise_schedule和steps参数，获取噪声调度的一系列权重因子（betas）
     betas = gd.get_named_beta_schedule(noise_schedule, steps)
+
+    # 根据use_kl参数的值，设置损失函数的类型
     if use_kl:
         loss_type = gd.LossType.RESCALED_KL
     elif rescale_learned_sigmas:
